@@ -50,21 +50,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc-any"
-version = "2.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c01a5e1f881f6fb6099a7bdf949e946719fd4f1fefa56264890574febf0eb6d0"
-dependencies = [
- "debug-helper",
-]
-
-[[package]]
-name = "debug-helper"
-version = "0.3.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f578e8e2c440e7297e008bb5486a3a8a194775224bbc23729b0dbdfaeebf162e"
-
-[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -114,22 +99,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rp2040-boot2"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c92f344f63f950ee36cf4080050e4dce850839b9175da38f9d2ffb69b4dbb21"
-dependencies = [
- "crc-any",
-]
-
-[[package]]
 name = "rp2040-flash-wake"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
- "cortex-m-rt",
+ "cortex-m-rt-macros",
  "panic-halt",
- "rp2040-boot2",
  "rp2040-pac",
 ]
 
