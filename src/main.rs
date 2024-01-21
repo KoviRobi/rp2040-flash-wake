@@ -8,6 +8,21 @@ use rp_pico as bsp;
 use bsp::{hal, pac};
 use cortex_m::prelude::*;
 use hal::fugit::ExtU32;
+use hal::usb::UsbBus as UsbBusImpl;
+use hal::Clock;
+use pac::interrupt;
+use usb_device::class_prelude::*;
+use usb_device::prelude::*;
+use usbd_serial::SerialPort;
+
+/// The USB Device Driver (shared with the interrupt).
+static mut USB_DEVICE: Option<UsbDevice<UsbBusImpl>> = None;
+
+/// The USB Bus Driver (shared with the interrupt).
+static mut USB_BUS: Option<UsbBusAllocator<UsbBusImpl>> = None;
+
+/// The USB Serial Device Driver (shared with the interrupt).
+static mut USB_SERIAL: Option<SerialPort<UsbBusImpl>> = None;
 
 extern "C" {
     #[link_name = "__vector_table"]
@@ -30,7 +45,7 @@ fn main() -> ! {
     unsafe { core.SCB.vtor.write(&VECTOR_TABLE as *const u32 as u32) };
 
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
-    let _clocks = hal::clocks::init_clocks_and_plls(
+    let clocks = hal::clocks::init_clocks_and_plls(
         bsp::XOSC_CRYSTAL_FREQ,
         pac.XOSC,
         pac.CLOCKS,
@@ -44,5 +59,60 @@ fn main() -> ! {
 
     watchdog.start(5.secs());
 
-    panic!();
+    let usb_bus = UsbBusAllocator::new(UsbBusImpl::new(
+        pac.USBCTRL_REGS,
+        pac.USBCTRL_DPRAM,
+        clocks.usb_clock,
+        true,
+        &mut pac.RESETS,
+    ));
+    // Safety: Interrupts not yet enabled
+    unsafe { USB_BUS = Some(usb_bus) };
+    let bus_ref = unsafe { USB_BUS.as_ref().unwrap() };
+
+    let usb_serial = SerialPort::new(bus_ref);
+    // Safety: Interrupts not yet enabled
+    unsafe { USB_SERIAL = Some(usb_serial) };
+
+    let usb_dev = UsbDeviceBuilder::new(bus_ref, UsbVidPid(0x1234, 0xabcd))
+        .manufacturer("KoviRobi")
+        .product("RP2040 flash wake")
+        .serial_number("Test")
+        .build();
+    unsafe { USB_DEVICE = Some(usb_dev) };
+
+    // Safety: No USB after this outside of the interrupt handler
+    unsafe { pac::NVIC::unmask(bsp::hal::pac::Interrupt::USBCTRL_IRQ) };
+
+    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    loop {
+        delay.delay_ms(1000);
+        watchdog.feed();
+    }
+}
+
+#[allow(non_snake_case)]
+#[interrupt]
+fn USBCTRL_IRQ() {
+    let usb_dev = unsafe { USB_DEVICE.as_mut().unwrap() };
+    let serial = unsafe { USB_SERIAL.as_mut().unwrap() };
+    let mut buf = [0u8; 64];
+
+    if usb_dev.poll(&mut [serial]) {
+        match serial.read(&mut buf) {
+            Err(_e) => {
+                // Do nothing
+            }
+            Ok(0) => {
+                // Do nothing
+            }
+            Ok(count) => {
+                for b in buf.iter_mut().take(count) {
+                    if *b == b'r' {
+                        bsp::hal::rom_data::reset_to_usb_boot(1 << 25, 0);
+                    }
+                }
+            }
+        }
+    }
 }
