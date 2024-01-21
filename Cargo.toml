@@ -1,0 +1,13 @@
+[package]
+name = "rp2040-flash-wake"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.3"
+panic-halt = "0.2.0"
+rp2040-boot2 = "0.3.0"
+rp2040-pac = { version = "0.5.0", features = ["rt"] }
