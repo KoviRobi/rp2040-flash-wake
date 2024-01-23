@@ -5,6 +5,9 @@ use panic_halt as _;
 
 use rp_pico as bsp;
 
+mod byte_str;
+mod cmdline;
+
 use bsp::{hal, pac};
 use cortex_m::prelude::*;
 use hal::fugit::ExtU32;
@@ -15,6 +18,10 @@ use usb_device::class_prelude::*;
 use usb_device::prelude::*;
 use usbd_serial::SerialPort;
 
+type SerialPortT<'a> = SerialPort<'a, UsbBusImpl, [u8; 128], [u8; 512]>;
+
+use heapless::Vec;
+
 /// The USB Device Driver (shared with the interrupt).
 static mut USB_DEVICE: Option<UsbDevice<UsbBusImpl>> = None;
 
@@ -22,7 +29,7 @@ static mut USB_DEVICE: Option<UsbDevice<UsbBusImpl>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<UsbBusImpl>> = None;
 
 /// The USB Serial Device Driver (shared with the interrupt).
-static mut USB_SERIAL: Option<SerialPort<UsbBusImpl>> = None;
+static mut USB_SERIAL: Option<SerialPortT> = None;
 
 extern "C" {
     #[link_name = "__vector_table"]
@@ -70,7 +77,7 @@ fn main() -> ! {
     unsafe { USB_BUS = Some(usb_bus) };
     let bus_ref = unsafe { USB_BUS.as_ref().unwrap() };
 
-    let usb_serial = SerialPort::new(bus_ref);
+    let usb_serial = SerialPort::new_with_store(bus_ref, [0; 128], [0; 512]);
     // Safety: Interrupts not yet enabled
     unsafe { USB_SERIAL = Some(usb_serial) };
 
@@ -98,6 +105,9 @@ fn USBCTRL_IRQ() {
     let serial = unsafe { USB_SERIAL.as_mut().unwrap() };
     let mut buf = [0u8; 64];
 
+    static mut CMDLINE: Vec<u8, 128> = Vec::new();
+    let cmdline = unsafe { &mut CMDLINE };
+
     if usb_dev.poll(&mut [serial]) {
         match serial.read(&mut buf) {
             Err(_e) => {
@@ -108,8 +118,30 @@ fn USBCTRL_IRQ() {
             }
             Ok(count) => {
                 for b in buf.iter_mut().take(count) {
-                    if *b == b'r' {
-                        bsp::hal::rom_data::reset_to_usb_boot(1 << 25, 0);
+                    match b {
+                        b'\n' | b'\r' => {
+                            const NUM_ARGS: usize = 16;
+                            cmdline::parse::<NUM_ARGS>(serial, cmdline);
+                            cmdline.clear();
+                        }
+                        b'\x15' /* ctrl-U */ => {
+                            while !cmdline.is_empty() {
+                                let _ = cmdline.pop();
+                                let _ = serial.write(b"\x08 \x08");
+                            }
+                        }
+                        b'\x08' /* backspace */ | b'\x7F' /* del but sometimes backspace */ => {
+                            let _ = cmdline.pop();
+                            let _ = serial.write(b"\x08 \x08");
+                        }
+                        b if !(b' '..b'\x7F').contains(b) => {
+                            // Ignore non-print
+                        }
+                        _ => {
+                            if cmdline.push(*b).is_ok() {
+                                let _ = serial.write(&[*b]);
+                            }
+                        }
                     }
                 }
             }
